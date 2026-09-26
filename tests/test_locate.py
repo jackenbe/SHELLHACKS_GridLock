@@ -28,6 +28,8 @@ def test_normalize():
 def test_guess_endpoints():
     assert guess_endpoints("EVANS PRIMARY - THOMSON PRIMARY 115KV REBUILD") == ("EVANS PRIMARY", "THOMSON PRIMARY 115KV REBUILD")
     assert guess_endpoints("SAV: GOSHEN (SAV) - MCINTOSH 115KV LINE REBUILD")[0] == "GOSHEN (SAV)"
+    assert guess_endpoints("Wateree-Killian 230kV: Rebuild") == ("Wateree", "Killian 230kV")
+    assert guess_endpoints("Union Pier 115-13.8 kV Sub: Tap") == ("Union Pier 115-13.8 kV Sub", None)
 
 
 def test_matches_and_confidence():
@@ -44,8 +46,9 @@ def test_matches_and_confidence():
     assert evans["match_b"] == "Thurmond Dam Substation"
     # picks the SC Jasper next to Okatie, not Jasper GA
     assert jasper["lat_a"] == 32.35912 and jasper["conf_b"] == "high"
-    # 'Hooks' vs 'Hooks Crossing' is only a partial match -> low, not high
-    assert hooks["conf_a"] == "low"
+    # 'Hooks' vs 'Hooks Crossing' is only a partial match, 200+ km from Thurmond -> not trusted
+    assert hooks["conf_a"] == "unconfirmed" and hooks["lat_a"] is None
+    assert hooks["match_a"] == "Hooks Crossing"   # kept as a suggestion for review
     assert fake["conf_a"] == fake["conf_b"] == "missing" and fake["lat_a"] is None
 
 
@@ -53,3 +56,29 @@ def test_known_points_win():
     recs = locate_records([{"name": "Hooks - Thurmond", "source": "DESC"}], SUBS,
                           known={"HOOKS": (33.5, -82.0)}, use_nominatim=False)
     assert (recs[0]["lat_a"], recs[0]["loc_source_a"], recs[0]["conf_a"]) == (33.5, "known", "high")
+
+
+def test_weak_match_in_other_state_rejected():
+    subs = SUBS + [{"id": "n/10", "name": "South", "lat": 32.6, "lon": -83.6, "state": "GA"}]
+    rec = locate_records([{"name": "Scout 230 kV Sub and Fold-in: Construct", "source": "DESC"}], subs)[0]
+    assert rec["lat_a"] is None and rec["conf_a"] in ("missing", "unconfirmed")
+
+
+def test_low_match_backed_by_nearby_partner_is_kept():
+    subs = SUBS + [{"id": "n/11", "name": "Bluffton Tap Station", "lat": 32.235, "lon": -80.853}]
+    rec = locate_records([{"name": "Okatie - Bluffton Tap", "source": "DESC"}], subs)[0]
+    assert rec["conf_a"] == "high" and rec["conf_b"] in ("high", "low") and rec["lat_b"] is not None
+
+
+def test_cross_state_needs_partner():
+    subs = [
+        {"id": "g1", "name": "Evans Primary", "lat": 33.54, "lon": -82.17, "state": "GA"},
+        {"id": "s1", "name": "Thurmond", "lat": 33.66, "lon": -82.19, "state": "SC"},
+        {"id": "s2", "name": "Hammond", "lat": 33.5, "lon": -81.9, "state": "SC"},
+    ]
+    border, lonely = locate_records([
+        {"name": "EVANS PRIMARY - THURMOND 115KV REBUILD", "source": "GPC"},  # backed by Evans
+        {"name": "HAMMOND - WEISS DAM 115KV LINE REBUILD", "source": "GPC"},  # nothing backs it
+    ], subs)
+    assert border["lat_b"] == 33.66
+    assert lonely["lat_a"] is None and lonely["conf_a"] == "unconfirmed"

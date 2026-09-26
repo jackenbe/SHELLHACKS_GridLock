@@ -38,3 +38,7 @@ yarn-error.log*
 Thumbs.db
 # Planning docs
 GRIDLOCK_PLAN.md
+
+# Pipeline + Gemini caches
+pipeline_cache.json
+gemini_cache/

@@ -6,7 +6,7 @@
                         substations with rapidfuzz and adds:
                           lat_a, lon_a, lat_b, lon_b        -> what overlap.find_overlaps() reads
                           match_a, match_b                  -> the OSM name it matched
-                          conf_a, conf_b                    -> "high" / "low" / "missing"
+                          conf_a, conf_b                    -> "high" / "low" / "unconfirmed" / "missing"
                           loc_source_a, loc_source_b        -> "known" / "osm" / "nominatim"
 
 Lookup order per endpoint: known coordinates (e.g. Sperry's xlsx) -> OSM fuzzy match
@@ -81,9 +81,16 @@ def normalize(name):
 
 
 def guess_endpoints(project_name):
-    """Fallback when endpoint_a/b weren't split by Gemini: 'A - B 115kV Rebuild' -> ('A', 'B')."""
+    """Fallback when endpoint_a/b weren't split by Gemini.
+
+    'A - B 115kV Rebuild' -> ('A', 'B 115kV Rebuild'), 'Wateree-Killian 230kV: Rebuild' ->
+    ('Wateree', 'Killian 230kV'). Splits on dashes between letters (not '230-115kV') and commas,
+    and ignores everything after the first ':' (the work description).
+    """
     name = re.sub(r"^[A-Z]{2,4}:\s*", "", project_name or "")
-    parts = [p.strip() for p in re.split(r"\s+[-–—]\s+", name) if p.strip()]
+    name = name.split(":")[0]
+    parts = re.split(r",|(?<=[A-Za-z)])\s*[-–—]\s*(?=[A-Za-z])", name)
+    parts = [p.strip() for p in parts if normalize(p)]
     if not parts:
         return None, None
     return parts[0], (parts[1] if len(parts) > 1 else None)
@@ -218,15 +225,25 @@ class SubstationIndex:
         self.subs = substations
         self.norms = [normalize(s["name"]) for s in substations]
 
-    def candidates(self, name, limit=10):
-        """[(score, substation)] best first, only scores >= LOW."""
+    def candidates(self, name, state=None, limit=10):
+        """[(score, substation)] best first, only scores >= LOW.
+
+        Substations outside the utility's state are only allowed on a high-confidence
+        match (border cases like Thurmond Dam), never on a weak one.
+        """
         q = normalize(name)
         if not q:
             return []
         rough = process.extract(q, self.norms, scorer=fuzz.token_set_ratio,
                                 limit=40, score_cutoff=LOW)
-        scored = [(_score(q, self.norms[i]), self.subs[i]) for _, _, i in rough]
-        scored = [x for x in scored if x[0] >= LOW]
+        scored = []
+        for _, _, i in rough:
+            sub, score = self.subs[i], _score(q, self.norms[i])
+            if score < LOW:
+                continue
+            if state and sub.get("state") and sub["state"] != state and score < HIGH:
+                continue  # weak match in the wrong state: never
+            scored.append((score, sub))
         scored.sort(key=lambda x: -x[0])
         return scored[:limit]
 
@@ -253,7 +270,7 @@ def _pick(cands_a, cands_b, state):
     return best
 
 
-def locate_records(records, substations=None, known=None, use_nominatim=True):
+def locate_records(records, substations=None, known=None, use_nominatim=False):
     """Add coordinates + confidence to every record. Returns the same list.
 
     known: optional {normalized name: (lat, lon)} of verified points, e.g. sperry_known_points().
@@ -267,17 +284,22 @@ def locate_records(records, substations=None, known=None, use_nominatim=True):
         if not a and not b:
             a, b = guess_endpoints(rec.get("name"))
 
-        cands = {"a": index.candidates(a) if a else [], "b": index.candidates(b) if b else []}
+        rec["endpoint_a"], rec["endpoint_b"] = a, b
+        cands = {"a": index.candidates(a, state) if a else [],
+                 "b": index.candidates(b, state) if b else []}
         picked = dict(zip("ab", _pick(cands["a"], cands["b"], state)))
 
+        cross_state = {}
         for end, name in (("a", a), ("b", b)):
             lat = lon = match = None
+            cross_state[end] = False
             conf, source = "missing", None
             if name and normalize(name) in known:
                 (lat, lon), match, conf, source = known[normalize(name)], name, "high", "known"
             elif picked[end]:
                 score, sub = picked[end]
                 lat, lon, match, conf, source = sub["lat"], sub["lon"], sub["name"], _confidence(score), "osm"
+                cross_state[end] = bool(state and sub.get("state") and sub["state"] != state)
             elif name and use_nominatim:
                 hit = nominatim_lookup(normalize(name) or name, state)
                 if hit:
@@ -286,6 +308,21 @@ def locate_records(records, substations=None, known=None, use_nominatim=True):
                 f"lat_{end}": lat, f"lon_{end}": lon, f"match_{end}": match,
                 f"conf_{end}": conf, f"loc_source_{end}": source,
             })
+
+        # A weak name match alone is not trusted (e.g. 'Scout' -> 'South' in another county),
+        # and neither is a match in the other utility's state (a GA 'Hammond' project matched to
+        # a SC 'Hammond'). Keep those only if the other end of the same line is a trusted,
+        # in-state match nearby; otherwise drop the coordinates and keep the name as a suggestion.
+        for end, other in (("a", "b"), ("b", "a")):
+            if rec[f"conf_{end}"] != "low" and not cross_state[end]:
+                continue
+            backed = (rec[f"conf_{other}"] == "high" and not cross_state[other] and
+                      rec[f"lat_{other}"] is not None and
+                      _km({"lat": rec[f"lat_{end}"], "lon": rec[f"lon_{end}"]},
+                          {"lat": rec[f"lat_{other}"], "lon": rec[f"lon_{other}"]}) <= MAX_LINE_KM)
+            if not backed:
+                rec[f"lat_{end}"] = rec[f"lon_{end}"] = None
+                rec[f"conf_{end}"] = "unconfirmed"
     return records
 
 
@@ -307,10 +344,10 @@ def sperry_known_points(xlsx=BASE / "data" / "Sperry-Tech-Challenge" / "Projects
 
 def summary(records):
     """Counts of high / low / missing endpoints, for the validation report."""
-    out = {"high": 0, "low": 0, "missing": 0}
+    out = {"high": 0, "low": 0, "unconfirmed": 0, "missing": 0}
     for r in records:
         for end in ("a", "b"):
-            if r.get(f"endpoint_{end}") or r.get(f"match_{end}") or end == "a":
+            if r.get(f"endpoint_{end}"):
                 out[r.get(f"conf_{end}", "missing")] += 1
     return out
 
