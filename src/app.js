@@ -1,0 +1,6 @@
+import "./styles.css";
+import Map from "./map";
+
+export default function App() {
+  return <Map />;
+}
