@@ -1,0 +1,38 @@
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Local database + caches
+*.db
+*.sqlite3
+geocode_cache/
+
+# User uploads (PDFs dropped into the app at runtime)
+uploads/
+
+# Frontend (React / Vite)
+node_modules/
+dist/
+.vite/
+npm-debug.log*
+yarn-error.log*
+
+# Editors + OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

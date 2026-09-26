@@ -1,0 +1,24 @@
+# API
+fastapi==0.141.1
+uvicorn[standard]==0.54.0
+python-multipart==0.0.32      # PDF uploads
+
+# Parsing
+pdfplumber==0.11.10
+openpyxl==3.1.5               # read Sperry's xlsx answer key
+
+# AI
+google-genai==2.25.0          # Gemini API
+
+# Geocoding + matching
+httpx==0.28.1                 # Overpass API calls
+rapidfuzz==3.14.6             # fuzzy substation name matching
+haversine==2.9.0
+
+# Database (Postgres on Tiger Data)
+sqlalchemy==2.1.1
+psycopg[binary]==3.3.6
+
+# Config + tests
+python-dotenv==1.2.3
+pytest==9.1.1                 # verify you reproduce their 6 overlaps
