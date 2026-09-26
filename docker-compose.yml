@@ -15,33 +15,18 @@ services:
       retries: 10
 
   backend:
-    build: ./backend
+    build: .
     env_file: .env
     environment:
       # Overrides .env so the backend talks to the local db container
       DATABASE_URL: postgresql+psycopg://gridlock:gridlock@db:5432/gridlock
     volumes:
-      - ./backend:/app        # live code reload
-      - ./data:/data          # Sperry PDFs + xlsx
+      - .:/app        # live code reload
     ports:
       - "8000:8000"
     depends_on:
       db:
         condition: service_healthy
-
-  frontend:
-    image: node:22-alpine
-    working_dir: /app
-    command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
-    environment:
-      CHOKIDAR_USEPOLLING: "true"   # hot reload on Mac/Windows mounts
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
-    ports:
-      - "5173:5173"
-    depends_on:
-      - backend
 
 volumes:
   pgdata:
