@@ -11,21 +11,29 @@ GET  /api/projects/{utility}/{project_id}
 GET  /api/overlaps                       ranked overlaps (filter: tier, time_overlap, limit)
 GET  /api/overlaps/{rank}                one overlap with both projects in full
 GET  /api/validation                     data-quality report
+GET  /api/impact                         money + resources saved by coordinating (and assumptions)
+GET  /api/utilities                      utilities loaded (preloaded + uploaded)
+DELETE /api/utilities/{code}             remove an uploaded utility (preloaded ones stay)
+POST /api/upload                         upload a utility's PDF (multipart) -> {job_id}
+GET  /api/upload/{job_id}                upload progress: status, progress %, message, result
 POST /api/refresh                        re-run the pipeline (re-parse, re-split, re-locate, re-save)
-POST /api/parse                          parse any PDF under data/ (Gemini fallback for new layouts)
 """
+import hashlib
+import re
+import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import APIRouter, FastAPI, HTTPException
+from fastapi import APIRouter, BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-
 import pipeline
-from read_pdf import read_pdf
+from overlap import closest_points
 
 BASE = Path(__file__).parent
+UPLOAD_DIR = BASE / "uploads"
+MAX_UPLOAD_MB = 60
 STATE = {}
+JOBS = {}  # upload job_id -> {status, progress, message, result}
 
 TIER_INFO = {
     "touching": "Projects touch or cross: must coordinate outage timing and crossing structures.",
@@ -37,7 +45,8 @@ TIER_INFO = {
 
 @asynccontextmanager
 async def lifespan(app):
-    STATE.update(pipeline.build())
+    with pipeline.LOCK:
+        STATE.update(pipeline.build())
     yield
 
 
@@ -82,11 +91,31 @@ def _find_project(utility, project_id):
     return None
 
 
+def _near_name(rec, pt):
+    """Substation name if the nearest point is one of the project's ends, else None (mid-line)."""
+    for end in ("a", "b"):
+        lat, lon = rec.get(f"lat_{end}"), rec.get(f"lon_{end}")
+        if lat is not None and abs(lat - pt[0]) < 1e-5 and abs(lon - pt[1]) < 1e-5:
+            name = rec.get(f"match_{end}") or rec.get(f"endpoint_{end}") or ""
+            # 'THURMOND DAM (USA) #5 115KV REBUILD' -> 'THURMOND DAM'
+            name = re.split(r"\b\d+(?:/\d+)?\s?kV\b", name, flags=re.I)[0]
+            name = re.sub(r"\(.*?\)|#\s*\d+", " ", name)
+            return " ".join(name.split()) or None
+    return None
+
+
 def _overlap_out(o, full=False):
     out = o._asdict()
     out["id_a"], out["id_b"] = _pid(o.utility_a, o.project_a), _pid(o.utility_b, o.project_b)
     out["tier_info"] = TIER_INFO.get(o.tier)
     a, b = _find_project(o.utility_a, o.project_a), _find_project(o.utility_b, o.project_b)
+    near = closest_points(a, b)  # where the two projects come closest, for the map's distance line
+    if near:
+        out["closest_a"] = [round(near[0][0], 6), round(near[0][1], 6)]
+        out["closest_b"] = [round(near[1][0], 6), round(near[1][1], 6)]
+        out["closest_name_a"], out["closest_name_b"] = _near_name(a, near[0]), _near_name(b, near[1])
+    per_pair = STATE.get("impact", ({}, {}))[0]
+    out["impact"] = per_pair.get((o.utility_a, o.project_a, o.utility_b, o.project_b))
     if full:
         out["project_a_detail"], out["project_b_detail"] = _project_out(a), _project_out(b)
     else:  # just enough geometry for the map
@@ -146,6 +175,11 @@ def overlap(rank: int):
     raise HTTPException(404, "overlap not found")
 
 
+@router.get("/impact")
+def impact():
+    return STATE["impact"][1]
+
+
 @router.get("/validation")
 def validation():
     checks = {}
@@ -165,26 +199,125 @@ def validation():
 
 @router.post("/refresh")
 def refresh():
-    STATE.update(pipeline.build(force=True))
+    with pipeline.LOCK:
+        STATE.update(pipeline.build(force=True))
     return health()
 
 
-class ParseRequest(BaseModel):
-    path: str  # e.g. "/data/using-data/notgeorgia.pdf"
+# ---------- uploads ----------
+
+@router.get("/utilities")
+def utilities():
+    counts = {}
+    for r in STATE["records"]:
+        counts[r["utility"]] = counts.get(r["utility"], 0) + 1
+    return [{"code": code, "name": u["name"], "state": u["state"], "projects": counts.get(code, 0),
+             "preloaded": code in pipeline.PRELOADED}
+            for code, u in pipeline.UTILITIES.items()]
 
 
-@router.post("/parse")
-def parse(req: ParseRequest):
-    """Parse a PDF under data/. Known layouts use regex; unknown ones fall back to Gemini."""
-    target = (BASE / req.path.lstrip("/")).resolve()
-    if not target.is_relative_to((BASE / "data").resolve()) or not target.is_file():
-        raise HTTPException(400, "path must point to a PDF inside data/")
-    records = read_pdf("/" + str(target.relative_to(BASE)))
-    method = "regex"
-    if not records:
-        from gemini_agent import GeminiAgent
-        records, method = GeminiAgent().extract_projects(target), "gemini"
-    return {"method": method, "count": len(records), "projects": records}
+@router.delete("/utilities/{code}")
+def remove_utility(code: str):
+    try:
+        with pipeline.LOCK:
+            pipeline.remove_utility(STATE, code.upper())
+    except KeyError:
+        raise HTTPException(404, "unknown utility")
+    except ValueError as err:
+        raise HTTPException(400, str(err))
+    return utilities()
+
+
+def _sha256(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _utility_with_same_file(digest):
+    """Code of an already-loaded utility whose PDF is byte-for-byte this upload, if any."""
+    for code, u in pipeline.UTILITIES.items():
+        path = BASE / u["pdf"].lstrip("/")
+        if path.exists() and _sha256(path) == digest:
+            return code
+    return None
+
+
+def _utility_code(name):
+    """Reuse the code of a utility with the same name (so re-uploads replace it),
+    otherwise build one from the initials: 'Duke Energy Carolinas' -> 'DEC'."""
+    for code, u in pipeline.UTILITIES.items():
+        if u["name"].strip().lower() == name.strip().lower() or code == name.strip().upper():
+            return code
+    words = re.findall(r"[A-Za-z0-9]+", name)
+    code = "".join(w[0] for w in words).upper()[:6] or "UTIL"
+    base, n = code, 2
+    while code in pipeline.UTILITIES:  # different name, same initials
+        code, n = f"{base}{n}", n + 1
+    return code
+
+
+def _run_upload(job_id, code, name, us_state, pdf):
+    job = JOBS[job_id]
+
+    def progress(pct, msg):
+        job.update(status="running", progress=pct, message=msg)
+
+    try:
+        with pipeline.LOCK:
+            job.update(result=pipeline.add_utility(STATE, code, name, us_state, pdf, progress),
+                       status="done", progress=100, message="Done")
+    except Exception as err:
+        job.update(status="error", message=str(err))
+
+
+@router.post("/upload")
+def upload(background: BackgroundTasks,
+           file: UploadFile = File(...),
+           utility_name: str = Form(...),
+           state: str = Form(...)):
+    """Upload one utility's planning PDF. Processing runs in the background; poll the job."""
+    data = file.file.read()
+    if not data.startswith(b"%PDF"):
+        raise HTTPException(400, "That file is not a PDF")
+    if len(data) > MAX_UPLOAD_MB * 1024 * 1024:
+        raise HTTPException(400, f"PDF is larger than {MAX_UPLOAD_MB} MB")
+    us_state = state.strip().upper()
+    if not re.fullmatch(r"[A-Z]{2}", us_state):
+        raise HTTPException(400, "state must be a 2-letter code like SC or GA")
+    if not utility_name.strip():
+        raise HTTPException(400, "utility_name is required")
+
+    full_digest = hashlib.sha256(data).hexdigest()
+    same = _utility_with_same_file(full_digest)
+    note = None
+    if same:  # same file as a loaded utility: refresh that one instead of adding a duplicate
+        code, name, us_state = same, pipeline.UTILITIES[same]["name"], pipeline.UTILITIES[same]["state"]
+        note = f"This is the same file as {name}, so it replaced {code} instead of adding a copy."
+    else:
+        code, name = _utility_code(utility_name), utility_name.strip()
+
+    if same:
+        pdf = pipeline.UTILITIES[same]["pdf"]  # already on disk
+    else:
+        UPLOAD_DIR.mkdir(exist_ok=True)
+        pdf = f"/uploads/{full_digest[:16]}.pdf"
+        (BASE / pdf.lstrip("/")).write_bytes(data)
+
+    job_id = uuid.uuid4().hex[:12]
+    JOBS[job_id] = {"job_id": job_id, "utility": code, "status": "queued", "progress": 0,
+                    "message": "Queued", "note": note, "result": None}
+    background.add_task(_run_upload, job_id, code, name, us_state, pdf)
+    return JOBS[job_id]
+
+
+@router.get("/upload/{job_id}")
+def upload_status(job_id: str):
+    if job_id not in JOBS:
+        raise HTTPException(404, "unknown job")
+    return JOBS[job_id]
 
 
 app.include_router(router)

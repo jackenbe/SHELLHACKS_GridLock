@@ -47,3 +47,14 @@ def test_shared_substation_is_touching():
 def test_far_projects_not_flagged():
     ids = {x for o in find_overlaps(sperry_records()) for x in (o.project_a, o.project_b)}
     assert not ids & {"DESC_4", "GPC_4", "GPC_5"}
+
+
+def test_closest_points_for_the_map():
+    from overlap import closest_points
+    crossing = closest_points({"lat_a": 33, "lon_a": -82, "lat_b": 34, "lon_b": -81},
+                              {"lat_a": 33, "lon_a": -81, "lat_b": 34, "lon_b": -82})
+    assert crossing[2] == 0.0 and crossing[0] == crossing[1]
+    a, b, km = closest_points({"lat_a": 33.0, "lon_a": -82.0},
+                              {"lat_a": 32.9, "lon_a": -82.2, "lat_b": 32.9, "lon_b": -81.8})
+    assert a == (33.0, -82.0) and abs(b[0] - 32.9) < 1e-9 and abs(b[1] + 82.0) < 1e-6
+    assert 11.0 < km < 11.2
