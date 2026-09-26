@@ -5,6 +5,7 @@ python-multipart==0.0.32      # PDF uploads
 
 # Parsing
 pdfplumber==0.11.10
+pypdfium2                     # fast page scanning (already a pdfplumber dependency)
 openpyxl==3.1.5               # read Sperry's xlsx answer key
 
 # AI
