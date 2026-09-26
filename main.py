@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from read_pdf import read_pdf
 from pydantic import BaseModel
+from overlap import find_overlaps, missing_coordinates, closest_km, Overlap
 
 app = FastAPI()
 
