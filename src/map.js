@@ -37,7 +37,7 @@ export default function Map() {
       .then(([proj, overlaps]) => {
         setProjects(proj);
         setOverlapIds(
-          new Set(overlaps.flatMap((o) => [o.project_a_id, o.project_b_id]))
+          new Set(overlaps.flatMap((o) => [o.id_a, o.id_b]))
         );
       })
       .catch((err) => setError(err.message))
