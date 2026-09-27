@@ -63,12 +63,19 @@ def _to_km(pts, lat0, lon0):
     return [((lon - lon0) * kx, (lat - lat0) * ky) for lat, lon in pts]
 
 
-def _point_to_segment(p, a, b):
+def _from_km(pt, lat0, lon0):
+    """Inverse of _to_km: plane (x, y) in km back to (lat, lon)."""
+    ky = math.radians(1) * EARTH_KM
+    kx = ky * math.cos(math.radians(lat0))
+    return (lat0 + pt[1] / ky, lon0 + pt[0] / kx)
+
+
+def _nearest_on_segment(p, a, b):
     (px, py), (ax, ay), (bx, by) = p, a, b
     dx, dy = bx - ax, by - ay
     length2 = dx * dx + dy * dy
     t = 0.0 if length2 == 0 else max(0.0, min(1.0, ((px - ax) * dx + (py - ay) * dy) / length2))
-    return math.hypot(px - (ax + t * dx), py - (ay + t * dy))
+    return (ax + t * dx, ay + t * dy)
 
 
 def _orient(a, b, c):
@@ -79,8 +86,11 @@ def _segments_cross(a, b, c, d):
     return (_orient(a, b, c) * _orient(a, b, d) < 0) and (_orient(c, d, a) * _orient(c, d, b) < 0)
 
 
-def closest_km(rec_a, rec_b):
-    """Closest distance in km between two projects, or None if either has no coordinates."""
+def closest_points(rec_a, rec_b):
+    """The nearest point on each project and the distance between them.
+
+    Returns ((lat, lon) on A, (lat, lon) on B, km), or None if either has no coordinates.
+    """
     pa, pb = _points(rec_a), _points(rec_b)
     if not pa or not pb:
         return None
@@ -89,12 +99,29 @@ def closest_km(rec_a, rec_b):
     lon0 = sum(p[1] for p in every) / len(every)
     A, B = _to_km(pa, lat0, lon0), _to_km(pb, lat0, lon0)
     a1, a2, b1, b2 = A[0], A[-1], B[0], B[-1]
-    if _segments_cross(a1, a2, b1, b2):
-        return 0.0
-    return min(
-        _point_to_segment(a1, b1, b2), _point_to_segment(a2, b1, b2),
-        _point_to_segment(b1, a1, a2), _point_to_segment(b2, a1, a2),
-    )
+
+    if _segments_cross(a1, a2, b1, b2):  # lines cross: the crossing point is on both
+        rx, ry = a2[0] - a1[0], a2[1] - a1[1]
+        sx, sy = b2[0] - b1[0], b2[1] - b1[1]
+        t = ((b1[0] - a1[0]) * sy - (b1[1] - a1[1]) * sx) / (rx * sy - ry * sx)
+        x = (a1[0] + t * rx, a1[1] + t * ry)
+        return _from_km(x, lat0, lon0), _from_km(x, lat0, lon0), 0.0
+
+    candidates = []
+    for p in (a1, a2):                     # endpoint of A -> nearest point on B
+        q = _nearest_on_segment(p, b1, b2)
+        candidates.append((math.dist(p, q), p, q))
+    for q in (b1, b2):                     # endpoint of B -> nearest point on A
+        p = _nearest_on_segment(q, a1, a2)
+        candidates.append((math.dist(p, q), p, q))
+    km, p, q = min(candidates, key=lambda c: c[0])
+    return _from_km(p, lat0, lon0), _from_km(q, lat0, lon0), km
+
+
+def closest_km(rec_a, rec_b):
+    """Closest distance in km between two projects, or None if either has no coordinates."""
+    result = closest_points(rec_a, rec_b)
+    return None if result is None else result[2]
 
 
 # ---------- time ----------

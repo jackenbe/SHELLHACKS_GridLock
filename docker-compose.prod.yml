@@ -1,0 +1,39 @@
+# Production: backend + frontend (Caddy) on one server. The database is Tiger Data
+# (DATABASE_URL in .env), so there is no local db container here.
+#
+#   docker compose -f docker-compose.prod.yml up -d --build
+services:
+  backend:
+    build: .
+    command: uvicorn main:app --host 0.0.0.0 --port 8000   # no --reload in production
+    env_file: .env
+    environment:
+      PIPELINE_CACHE: /app/state/pipeline_cache.json
+    volumes:                      # caches + uploads survive rebuilds
+      - ./state:/app/state
+      - ./uploads:/app/uploads
+      - ./gemini_cache:/app/gemini_cache
+      - ./geocode_cache:/app/geocode_cache
+    expose:
+      - "8000"
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: frontend.Dockerfile
+    environment:
+      DOMAIN: ${DOMAIN:-:80}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - caddy_data:/data          # HTTPS certificates
+      - caddy_config:/config
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  caddy_data:
+  caddy_config:

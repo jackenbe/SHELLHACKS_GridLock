@@ -14,7 +14,7 @@ from datetime import date, datetime
 
 from dotenv import load_dotenv
 from sqlalchemy import (BigInteger, Boolean, Date, DateTime, Float, ForeignKey, Integer,
-                        String, Text, UniqueConstraint, create_engine, delete, func)
+                        String, Text, UniqueConstraint, create_engine, delete, func, select)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker
 
 load_dotenv()
@@ -185,6 +185,15 @@ def save_projects(records):
         s.execute(stmt)
         ids = s.query(Project.id, Project.utility, Project.project_id).all()
     return {(u, p): i for i, u, p in ids}
+
+
+def delete_utility(code):
+    """Remove a utility's projects (their overlaps and validations go with them)."""
+    ids = select(Project.id).where(Project.utility == code)
+    with SessionLocal.begin() as s:
+        s.execute(delete(Overlap).where(Overlap.project_a_id.in_(ids) | Overlap.project_b_id.in_(ids)))
+        s.execute(delete(Validation).where(Validation.project_pk.in_(ids)))
+        s.execute(delete(Project).where(Project.utility == code))
 
 
 def save_substations(substations):

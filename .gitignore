@@ -42,3 +42,6 @@ GRIDLOCK_PLAN.md
 # Pipeline + Gemini caches
 pipeline_cache.json
 gemini_cache/
+
+# Server-side pipeline cache
+state/

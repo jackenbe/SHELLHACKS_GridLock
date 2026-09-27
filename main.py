@@ -15,6 +15,8 @@ GET  /api/impact                         money + resources saved by coordinating
 GET  /api/utilities                      utilities loaded (preloaded + uploaded)
 DELETE /api/utilities/{code}             remove an uploaded utility (preloaded ones stay)
 POST /api/upload                         upload a utility's PDF (multipart) -> {job_id}
+POST /api/find-plans                     search planning portals + Gemini for a utility's plan PDFs
+POST /api/import-url                     download a plan PDF from a link and process it -> {job_id}
 GET  /api/upload/{job_id}                upload progress: status, progress %, message, result
 POST /api/refresh                        re-run the pipeline (re-parse, re-split, re-locate, re-save)
 """
@@ -26,6 +28,9 @@ from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+
+import finder
 import pipeline
 from overlap import closest_points
 
@@ -86,7 +91,7 @@ def _project_out(r):
 
 def _find_project(utility, project_id):
     for r in STATE["records"]:
-        if r["utility"] == utility and str(r.get("project_id")) == project_id:
+        if r["utility"] == utility and str(r.get("project_id")) == str(project_id):
             return r
     return None
 
@@ -109,7 +114,7 @@ def _overlap_out(o, full=False):
     out["id_a"], out["id_b"] = _pid(o.utility_a, o.project_a), _pid(o.utility_b, o.project_b)
     out["tier_info"] = TIER_INFO.get(o.tier)
     a, b = _find_project(o.utility_a, o.project_a), _find_project(o.utility_b, o.project_b)
-    near = closest_points(a, b)  # where the two projects come closest, for the map's distance line
+    near = closest_points(a, b) if a and b else None  # nearest points, for the map's distance line
     if near:
         out["closest_a"] = [round(near[0][0], 6), round(near[0][1], 6)]
         out["closest_b"] = [round(near[1][0], 6), round(near[1][1], 6)]
@@ -252,7 +257,10 @@ def _utility_code(name):
         if u["name"].strip().lower() == name.strip().lower() or code == name.strip().upper():
             return code
     words = re.findall(r"[A-Za-z0-9]+", name)
-    code = "".join(w[0] for w in words).upper()[:6] or "UTIL"
+    if len(words) == 1:  # already an abbreviation, e.g. "FPL", "TVA"
+        code = words[0].upper()[:6]
+    else:                # initials: "Duke Energy Carolinas" -> "DEC"
+        code = "".join(w[0] for w in words).upper()[:6] or "UTIL"
     base, n = code, 2
     while code in pipeline.UTILITIES:  # different name, same initials
         code, n = f"{base}{n}", n + 1
@@ -273,44 +281,100 @@ def _run_upload(job_id, code, name, us_state, pdf):
         job.update(status="error", message=str(err))
 
 
+def _check_inputs(utility_name, state):
+    us_state = state.strip().upper()
+    if not re.fullmatch(r"[A-Z]{2}", us_state):
+        raise HTTPException(400, "state must be a 2-letter code like SC or GA")
+    if not utility_name.strip():
+        raise HTTPException(400, "utility_name is required")
+    return utility_name.strip(), us_state
+
+
+def _store_pdf(data, utility_name, us_state):
+    """Save the PDF and decide which utility it belongs to. Returns (code, name, state, pdf, note)."""
+    if not data.startswith(b"%PDF"):
+        raise ValueError("That file is not a PDF")
+    if len(data) > MAX_UPLOAD_MB * 1024 * 1024:
+        raise ValueError(f"PDF is larger than {MAX_UPLOAD_MB} MB")
+    full_digest = hashlib.sha256(data).hexdigest()
+    same = _utility_with_same_file(full_digest)
+    if same:  # same file as a loaded utility: refresh that one instead of adding a duplicate
+        u = pipeline.UTILITIES[same]
+        note = f"This is the same file as {u['name']}, so it replaced {same} instead of adding a copy."
+        return same, u["name"], u["state"], u["pdf"], note
+    UPLOAD_DIR.mkdir(exist_ok=True)
+    pdf = f"/uploads/{full_digest[:16]}.pdf"
+    (BASE / pdf.lstrip("/")).write_bytes(data)
+    return _utility_code(utility_name), utility_name, us_state, pdf, None
+
+
+def _new_job(code):
+    job_id = uuid.uuid4().hex[:12]
+    JOBS[job_id] = {"job_id": job_id, "utility": code, "status": "queued", "progress": 0,
+                    "message": "Queued", "note": None, "result": None}
+    return JOBS[job_id]
+
+
 @router.post("/upload")
 def upload(background: BackgroundTasks,
            file: UploadFile = File(...),
            utility_name: str = Form(...),
            state: str = Form(...)):
     """Upload one utility's planning PDF. Processing runs in the background; poll the job."""
-    data = file.file.read()
-    if not data.startswith(b"%PDF"):
-        raise HTTPException(400, "That file is not a PDF")
-    if len(data) > MAX_UPLOAD_MB * 1024 * 1024:
-        raise HTTPException(400, f"PDF is larger than {MAX_UPLOAD_MB} MB")
-    us_state = state.strip().upper()
-    if not re.fullmatch(r"[A-Z]{2}", us_state):
-        raise HTTPException(400, "state must be a 2-letter code like SC or GA")
-    if not utility_name.strip():
-        raise HTTPException(400, "utility_name is required")
+    name, us_state = _check_inputs(utility_name, state)
+    try:
+        code, name, us_state, pdf, note = _store_pdf(file.file.read(), name, us_state)
+    except ValueError as err:
+        raise HTTPException(400, str(err))
+    job = _new_job(code)
+    job["note"] = note
+    background.add_task(_run_upload, job["job_id"], code, name, us_state, pdf)
+    return job
 
-    full_digest = hashlib.sha256(data).hexdigest()
-    same = _utility_with_same_file(full_digest)
-    note = None
-    if same:  # same file as a loaded utility: refresh that one instead of adding a duplicate
-        code, name, us_state = same, pipeline.UTILITIES[same]["name"], pipeline.UTILITIES[same]["state"]
-        note = f"This is the same file as {name}, so it replaced {code} instead of adding a copy."
-    else:
-        code, name = _utility_code(utility_name), utility_name.strip()
 
-    if same:
-        pdf = pipeline.UTILITIES[same]["pdf"]  # already on disk
-    else:
-        UPLOAD_DIR.mkdir(exist_ok=True)
-        pdf = f"/uploads/{full_digest[:16]}.pdf"
-        (BASE / pdf.lstrip("/")).write_bytes(data)
+# ---------- find plans online ----------
 
-    job_id = uuid.uuid4().hex[:12]
-    JOBS[job_id] = {"job_id": job_id, "utility": code, "status": "queued", "progress": 0,
-                    "message": "Queued", "note": note, "result": None}
-    background.add_task(_run_upload, job_id, code, name, us_state, pdf)
-    return JOBS[job_id]
+class FindRequest(BaseModel):
+    utility_name: str
+    state: str
+
+
+class ImportRequest(BaseModel):
+    url: str
+    utility_name: str
+    state: str
+
+
+@router.post("/find-plans")
+def find_plans(req: FindRequest):
+    """Search planning portals (and Gemini + Google Search) for this utility's plan PDFs."""
+    name, us_state = _check_inputs(req.utility_name, req.state)
+    return finder.find_plans(name, us_state)
+
+
+def _run_import(job_id, url, name, us_state):
+    job = JOBS[job_id]
+    try:
+        job.update(status="running", progress=2, message="Downloading the PDF")
+        code, name, us_state, pdf, note = _store_pdf(finder.download_pdf(url), name, us_state)
+        job.update(utility=code, note=note)
+    except Exception as err:
+        job.update(status="error", message=f"Could not import that link: {err}")
+        return
+    _run_upload(job_id, code, name, us_state, pdf)
+
+
+@router.post("/import-url")
+def import_url(req: ImportRequest, background: BackgroundTasks):
+    """Download a plan PDF from a link (e.g. a /find-plans result) and process it like an upload."""
+    name, us_state = _check_inputs(req.utility_name, req.state)
+    try:
+        finder.check_public_url(req.url)
+    except (ValueError, OSError) as err:
+        raise HTTPException(400, str(err))
+    job = _new_job(_utility_code(name))
+    background.add_task(_run_import, job["job_id"], req.url, name, us_state)
+    return job
 
 
 @router.get("/upload/{job_id}")

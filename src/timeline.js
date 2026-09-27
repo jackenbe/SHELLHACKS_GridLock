@@ -18,7 +18,8 @@ export default function Timeline({ a, b, overlap, codes }) {
   const span = new Date(maxYear, 0, 1) - new Date(minYear, 0, 1);
   const pct = (d) => ((d - new Date(minYear, 0, 1)) / span) * 100;
   const years = [];
-  for (let y = minYear; y <= maxYear; y++) years.push(y);
+  const step = maxYear - minYear > 12 ? 5 : maxYear - minYear > 6 ? 2 : 1; // keep the axis readable
+  for (let y = minYear; y <= maxYear; y += step) years.push(y);
 
   const verdict = overlap.time_overlap
     ? "Built in the same window: crews and equipment can be shared at the same time."
@@ -27,8 +28,8 @@ export default function Timeline({ a, b, overlap, codes }) {
     : "Schedule unknown for one of the projects.";
 
   return (
-    <div className="timeline">
-      <div className="timeline-title">When construction happens</div>
+    <div className="detail-card timeline">
+      <div className="detail-title">When construction happens</div>
       {rows.map(({ p, start, end, color }) => (
         <div className="timeline-row" key={p.id}>
           <span className="timeline-label" style={{ color }}>{p.utility}</span>

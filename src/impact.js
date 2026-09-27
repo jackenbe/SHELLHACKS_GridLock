@@ -11,51 +11,54 @@ export function ImpactSummary({ summary }) {
   const now = summary.current_schedules;
   const aligned = summary.if_schedules_aligned;
   return (
-    <div className="impact-summary">
-      <div className="impact-title">Money at stake</div>
+    <section className="impact-summary">
+      <div className="eyebrow">Estimated savings from coordinating</div>
       <div className="impact-numbers">
-        <div>
+        <div className="stat">
           <span className="impact-big">{money(now.savings_musd)}</span>
-          <span className="impact-sub">saved with today's schedules</span>
+          <span className="impact-sub">with today's schedules</span>
         </div>
-        <div>
+        <div className="stat">
           <span className="impact-big aligned">{money(aligned.savings_musd)}</span>
-          <span className="impact-sub">if overlapping schedules are aligned</span>
+          <span className="impact-sub">if overlapping schedules align</span>
         </div>
       </div>
       <div className="impact-resources">
-        {aligned.mobilizations_avoided} crew mobilizations · {aligned.studies_avoided} environmental
-        studies{aligned.row_acres_shared ? ` · ${aligned.row_acres_shared} acres of right-of-way` : ""} not
-        duplicated
+        <span><b className="mono">{aligned.mobilizations_avoided}</b> crew mobilizations</span>
+        <span><b className="mono">{aligned.studies_avoided}</b> environmental studies</span>
+        {aligned.row_acres_shared > 0 && (
+          <span><b className="mono">{aligned.row_acres_shared}</b> acres of right-of-way</span>
+        )}
+        <span className="muted">not duplicated</span>
       </div>
       <details className="impact-how">
-        <summary>How is this estimated?</summary>
+        <summary>How this is estimated</summary>
         <p>{summary.note}</p>
         <ul>
           {summary.assumptions.map((a) => (
             <li key={a.item}>
-              <b>{a.item}:</b> {a.value} <span className="impact-source">({a.source})</span>
+              <b>{a.item}</b> {a.value} <span className="impact-source">{a.source}</span>
             </li>
           ))}
         </ul>
       </details>
-    </div>
+    </section>
   );
 }
 
 export function ImpactChip({ impact }) {
   if (!impact) return null;
-  if (impact.savings > 0) return <span className="money-chip">saves {money(impact.savings)}</span>;
+  if (impact.savings > 0) return <span className="money-chip">{money(impact.savings)}</span>;
   if (impact.savings_if_aligned > 0)
-    return <span className="money-chip aligned">up to {money(impact.savings_if_aligned)}</span>;
+    return <span className="money-chip aligned" title="If one schedule shifts">≤ {money(impact.savings_if_aligned)}</span>;
   return null;
 }
 
 export function ImpactDetail({ impact, o }) {
   if (!impact) return null;
   return (
-    <div className="impact-detail">
-      <div className="timeline-title">Money and resources</div>
+    <div className="detail-card impact-detail">
+      <div className="detail-title">Money and resources</div>
       <table>
         <tbody>
           <tr>
@@ -80,7 +83,7 @@ export function ImpactDetail({ impact, o }) {
             <td className="num">
               {money(impact.savings)}
               {impact.savings_if_aligned > impact.savings && (
-                <> (up to {money(impact.savings_if_aligned)})</>
+                <span className="muted"> · up to {money(impact.savings_if_aligned)}</span>
               )}
             </td>
             <td />

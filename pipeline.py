@@ -23,7 +23,8 @@ from read_pdf import read_pdf
 
 BASE = Path(__file__).parent
 load_dotenv(BASE / ".env")
-CACHE_FILE = BASE / "pipeline_cache.json"
+# on the server this points into a mounted folder so it survives container rebuilds
+CACHE_FILE = Path(os.getenv("PIPELINE_CACHE", BASE / "pipeline_cache.json"))
 CACHE_VERSION = 2
 LOCK = threading.Lock()  # one pipeline change at a time (startup, refresh, uploads)
 
@@ -73,6 +74,23 @@ def _split_endpoints(records):
             r.pop("endpoint_a", None)
             r.pop("endpoint_b", None)
         return "regex"
+
+
+def _ensure_ids(records):
+    """Some plans (e.g. FPL's Ten-Year Site Plan) have no project numbers. Give those projects a
+    stable ID built from the name so overlaps, the map and the database can tell them apart."""
+    import hashlib
+    seen = set()
+    for r in records:
+        pid = r.get("project_id")
+        if pid in (None, ""):
+            base = "N-" + hashlib.sha1(f"{r.get('name')}|{r.get('page')}".encode()).hexdigest()[:6]
+            pid, n = base, 2
+            while (r.get("utility"), pid) in seen:
+                pid, n = f"{base}-{n}", n + 1
+        r["project_id"] = str(pid)
+        seen.add((r.get("utility"), r["project_id"]))
+    return records
 
 
 def _parse(pdf, progress=lambda pct, msg: None):
@@ -134,6 +152,7 @@ def build(force=False, save_to_db=True):
                 r["utility"] = code
             print(f"[pipeline] {code}: {len(recs)} projects ({method})")
             records += recs
+        _ensure_ids(records)
         split_method = _split_endpoints(records)
         substations = _load_substations()
         locate_records(records, substations, known=sperry_known_points())
@@ -142,6 +161,7 @@ def build(force=False, save_to_db=True):
         for code, u in cached.get("utilities", {}).items():  # restore uploaded utilities
             _register(code, u["name"], u["state"], u["pdf"])
         records, split_method, substations = cached["records"], cached["split_method"], None
+        _ensure_ids(records)
 
     overlaps = find_overlaps(records)
     validations = validate(records)
@@ -162,6 +182,7 @@ def build(force=False, save_to_db=True):
 
 
 def _write_cache(records, split_method):
+    CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
     CACHE_FILE.write_text(json.dumps({"version": CACHE_VERSION, "split_method": split_method,
                                       "utilities": UTILITIES, "records": records}))
 
@@ -175,10 +196,15 @@ def add_utility(state, code, name, us_state, pdf, progress=lambda pct, msg: None
     progress(5, "Reading the PDF")
     records, method = _parse(pdf, progress)
     if not records:
+        from page_detect import page_texts
+        if sum(len(t.strip()) for t in page_texts(str(BASE / pdf.lstrip("/")))) < 200:
+            raise ValueError("This PDF is scanned images with no text layer, so it can't be read. "
+                             "Try a text-based copy of the filing.")
         raise ValueError("No planned projects found in this PDF" +
                          ("" if os.getenv("GEMINI_API_KEY") else " (set GEMINI_API_KEY to read new layouts)"))
     for r in records:
         r["utility"] = code
+    _ensure_ids(records)
 
     if method == "regex":
         progress(68, "Splitting line names into substations")

@@ -11,7 +11,15 @@ The cutoff is relative to the document's own best pages, so it adapts per PDF.
 import re
 import pypdfium2 as pdfium
 
-DATE = re.compile(r"\b\d{1,2}/\d{1,2}/\d{2,4}\b")
+MONTHS = r"(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?"
+DATE = re.compile(
+    r"\b\d{1,2}/\d{1,2}/\d{2,4}\b"                    # 12/31/2025, 6/1/26
+    r"|\b\d{1,2}/\d{4}\b"                              # 06/2026
+    rf"|\b{MONTHS}[\s/,.-]*\d{{4}}\b"                    # June/2026, Dec 2031
+    r"|\b(?:start|end|in[- ]service|completion|need|commercial operation)\b[^\n\d]{0,25}"
+    r"\b20[2-4]\d\b",                                   # "Start date: 2025"
+    re.I,
+)
 KV = re.compile(r"\b\d{2,3}\s?kV\b", re.I)
 TERMS = re.compile(
     r"\b(rebuild|reconductor|construct\w*|install\w*|upgrade\w*|substation|sub|"
@@ -20,13 +28,15 @@ TERMS = re.compile(
 )
 LABELS = re.compile(
     r"project\s+(id|name|status|description|need)|in-service|need\s+date|"
-    r"estimated\s+(project\s+)?cost|start\s+date",
+    r"estimated\s+(project\s+)?cost|start\s+date|terminals?\b|point\s+of\s+origin|"
+    r"line\s+length|construction\s+timing|proposed\s+(transmission|power)\s+lines?",
     re.I,
 )
 # checked only in the top of the page, where section headings live
 EXCLUDE = re.compile(
     r"\b(cancel+ed|completed|removed from|operating guides?|table of contents|"
-    r"glossary|acronyms|index)\b",
+    r"glossary|acronyms|index|purchased power|fuel (requirements|use|price)|emissions|"
+    r"load forecast|generating (facilit\w*|units?)|power plant specifications)\b",
     re.I,
 )
 HEAD_LINES = 12

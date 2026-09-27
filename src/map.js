@@ -1,7 +1,8 @@
 import "leaflet/dist/leaflet.css";
-import { useEffect } from "react";
+import { memo, useEffect, useMemo } from "react";
+import L from "leaflet";
 import {
-  CircleMarker, MapContainer, Polyline, Popup, TileLayer, Tooltip, useMap,
+  CircleMarker, MapContainer, Polyline, Popup, TileLayer, Tooltip, ZoomControl, useMap,
 } from "react-leaflet";
 import { utilityColor } from "./colors";
 import { fmtMonth } from "./dates";
@@ -12,6 +13,23 @@ import { fmtMonth } from "./dates";
 // Selecting an overlap fades everything else, labels both projects, and draws a dashed line
 // between their nearest points with the distance on it.
 
+// Draw every line/dot on one <canvas> instead of hundreds of SVG elements: panning and
+// zooming stay smooth. tolerance makes thin lines easy to hover and click.
+const CANVAS = L.canvas({ padding: 0.5, tolerance: 6 });
+
+// Snappier interaction than Leaflet's defaults (half-step zoom, faster wheel, short fly).
+const MAP_OPTIONS = {
+  renderer: CANVAS,
+  preferCanvas: true,
+  zoomSnap: 0.25,
+  zoomDelta: 0.5,
+  wheelPxPerZoomLevel: 45,   // default 60: less scrolling per zoom level
+  wheelDebounceTime: 10,     // default 40 ms: react to the wheel sooner
+  inertiaDeceleration: 2000, // default 3000: drags glide a little further
+  worldCopyJump: false,
+  zoomControl: false,        // re-added bottom-right, out of the way of the panels
+};
+
 function points(p) {
   const pts = [];
   if (p.lat_a != null && p.lon_a != null) pts.push([p.lat_a, p.lon_a]);
@@ -19,12 +37,29 @@ function points(p) {
   return pts;
 }
 
-function ZoomToSelection({ selectedProjects }) {
+// the westernmost project of the selected pair gets its label on the left
+function labelSide(pair, i) {
+  const lon = (p) => {
+    const pts = points(p);
+    return pts.reduce((s, q) => s + q[1], 0) / pts.length;
+  };
+  if (pair.length < 2) return "right";
+  return lon(pair[i]) <= lon(pair[1 - i]) ? "left" : "right";
+}
+
+function ZoomToSelection({ selectedProjects, selectionKey }) {
   const map = useMap();
   useEffect(() => {
     const pts = selectedProjects.flatMap(points);
-    if (pts.length) map.flyToBounds(pts, { padding: [90, 90], maxZoom: 11 });
-  }, [map, selectedProjects]);
+    // keep the pair clear of the list panel on the left and the top bar
+    const wide = window.innerWidth > 820; // on phones the list is a bottom sheet instead
+    if (pts.length) map.flyToBounds(pts, {
+      paddingTopLeft: wide ? [460, 130] : [40, 130],
+      paddingBottomRight: wide ? [90, 90] : [40, window.innerHeight * 0.5],
+      maxZoom: 11, duration: 0.6,
+    });
+    // only when the selection changes, not on every re-render
+  }, [map, selectionKey]);
   return null;
 }
 
@@ -49,12 +84,14 @@ function ProjectPopup({ p }) {
   );
 }
 
-function ProjectShape({ p, color, selected, faded, overlapping }) {
+const ProjectShape = memo(function ProjectShape({ p, color, selected, faded, overlapping, side = "top" }) {
   const pts = points(p);
   const opacity = faded ? 0.25 : 0.95;
   const label = (
-    <Tooltip sticky={!selected} permanent={selected} direction="top" className={selected ? "project-label" : ""}>
-      <b>{p.utility}</b> {p.name}
+    <Tooltip sticky={!selected} permanent={selected} direction={selected ? side : "top"}
+      offset={selected ? (side === "left" ? [-12, 0] : [12, 0]) : [0, -6]}
+      className={selected ? "project-label" : ""}>
+      <b>{p.utility}</b> {selected && p.name.length > 42 ? `${p.name.slice(0, 40)}…` : p.name}
       <br />
       {p.start_date ? `Building ${fmtMonth(p.start_date)} → ${fmtMonth(p.in_service)}` : `In service ${fmtMonth(p.in_service)}`}
     </Tooltip>
@@ -92,7 +129,7 @@ function ProjectShape({ p, color, selected, faded, overlapping }) {
       <ProjectPopup p={p} />
     </CircleMarker>
   );
-}
+});
 
 function DistanceLine({ overlap }) {
   if (!overlap.closest_a || !overlap.closest_b) return null;
@@ -105,7 +142,7 @@ function DistanceLine({ overlap }) {
       ? na || nb ? `at ${na || nb}` : "the two lines cross here"
       : `${overlap.utility_a} ${where(na)}  ↔  ${overlap.utility_b} ${where(nb)}`;
   const label = (
-    <Tooltip permanent direction="top" offset={[0, -12]} className="distance-label">
+    <Tooltip permanent direction="bottom" offset={[0, 26]} className="distance-label">
       <div>{title}</div>
       <div className="distance-sub">{subtitle}</div>
     </Tooltip>
@@ -130,20 +167,31 @@ function DistanceLine({ overlap }) {
 }
 
 export default function Map({ projects, overlaps, codes, selected }) {
-  const inOverlap = new Set(overlaps.flatMap((o) => [o.id_a, o.id_b]));
-  const selectedIds = new Set(selected ? [selected.id_a, selected.id_b] : []);
-  const byId = Object.fromEntries(projects.map((p) => [p.id, p]));
-  const selectedProjects = selected ? [byId[selected.id_a], byId[selected.id_b]].filter(Boolean) : [];
+  const inOverlap = useMemo(() => new Set(overlaps.flatMap((o) => [o.id_a, o.id_b])), [overlaps]);
+  const byId = useMemo(() => Object.fromEntries(projects.map((p) => [p.id, p])), [projects]);
+  const located = useMemo(() => projects.filter((p) => points(p).length > 0), [projects]);
 
-  const located = projects.filter((p) => points(p).length > 0);
-  const others = located.filter((p) => !selectedIds.has(p.id));
+  const selectionKey = selected ? `${selected.id_a}|${selected.id_b}` : "";
+  const selectedProjects = useMemo(
+    () => (selected ? [byId[selected.id_a], byId[selected.id_b]].filter(Boolean) : []),
+    [byId, selectionKey]
+  );
+  const others = useMemo(() => {
+    const ids = new Set(selectedProjects.map((p) => p.id));
+    return located.filter((p) => !ids.has(p.id));
+  }, [located, selectedProjects]);
 
   return (
     <div className="map-wrap">
-      <MapContainer center={[33.2, -81.5]} zoom={7}>
+      <MapContainer center={[33.2, -81.5]} zoom={7} {...MAP_OPTIONS}>
+        {/* OpenStreetMap tiles: free, no API key. keepBuffer loads extra tiles around the view
+            so panning doesn't show gray gaps. */}
         <TileLayer
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          url="https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+          maxZoom={19}
+          keepBuffer={4}
+          updateWhenZooming={false}
         />
 
         {others.map((p) => (
@@ -157,24 +205,28 @@ export default function Map({ projects, overlaps, codes, selected }) {
         ))}
 
         {/* selected pair drawn last so it sits on top */}
-        {selectedProjects.map((p) => (
-          <ProjectShape key={`sel-${p.id}`} p={p} color={utilityColor(p.utility, codes)} selected overlapping />
+        {selectedProjects.map((p, i) => (
+          // labels go left and right of the pair so they don't cover each other or the distance
+          <ProjectShape key={`sel-${p.id}`} p={p} color={utilityColor(p.utility, codes)} selected overlapping
+            side={labelSide(selectedProjects, i)} />
         ))}
         {selected && <DistanceLine key={`dist-${selected.rank}`} overlap={selected} />}
 
-        <ZoomToSelection selectedProjects={selectedProjects} />
+        <ZoomToSelection selectedProjects={selectedProjects} selectionKey={selectionKey} />
+        <ZoomControl position="bottomright" />
       </MapContainer>
 
-      <div className="legend">
-        {codes.map((c) => (
-          <div key={c}>
-            <span className="swatch" style={{ background: utilityColor(c, codes) }} /> {c}
-          </div>
-        ))}
-        <div className="legend-note">line = project between two substations (dots)</div>
-        <div className="legend-note">thick = overlaps another utility</div>
-        <div className="legend-note">black rings = where a selected pair comes closest</div>
-        <div className="legend-note">hover a project for its dates</div>
+      <div className="legend glass">
+        <div className="legend-items">
+          {codes.map((c) => (
+            <span key={c} className="legend-item">
+              <span className="swatch" style={{ background: utilityColor(c, codes) }} />
+              <span className="mono">{c}</span>
+            </span>
+          ))}
+        </div>
+        <div className="legend-note">Line: project between two substations · Thick: overlaps another utility</div>
+        <div className="legend-note">Rings: nearest points of the selected pair · Hover for dates</div>
       </div>
     </div>
   );

@@ -1,0 +1,6 @@
+# the frontend image only needs these (the main .dockerignore excludes src/ and public/)
+*
+!package.json
+!public/**
+!src/**
+!Caddyfile
