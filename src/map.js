@@ -48,19 +48,20 @@ function labelSide(pair, i) {
   return lon(pair[i]) <= lon(pair[1 - i]) ? "left" : "right";
 }
 
-function ZoomToSelection({ selectedProjects, selectionKey }) {
+function ZoomToSelection({ selectedProjects, selectionKey, sidebarOpen }) {
   const map = useMap();
   useEffect(() => {
     const pts = selectedProjects.flatMap(points);
     // keep the pair clear of the list panel on the left and the top bar
-    const wide = window.innerWidth > 820; // on phones the list is a bottom sheet instead
+    const wide = window.innerWidth > 820 && sidebarOpen; // on phones the list is a bottom sheet instead
+    const sheet = window.innerWidth <= 820 && sidebarOpen;
     if (pts.length) map.flyToBounds(pts, {
       paddingTopLeft: wide ? [460, 130] : [40, 130],
-      paddingBottomRight: wide ? [90, 90] : [40, window.innerHeight * 0.5],
+      paddingBottomRight: sheet ? [40, window.innerHeight * 0.5] : [90, 90],
       maxZoom: 11, duration: 0.6,
     });
-    // only when the selection changes, not on every re-render
-  }, [map, selectionKey]);
+    // only when the selection changes or the list opens/closes, not on every re-render
+  }, [map, selectionKey, sidebarOpen]);
   return null;
 }
 
@@ -184,7 +185,7 @@ function DistanceLine({ overlap }) {
   );
 }
 
-export default function Map({ projects, overlaps, codes, selected, activeIds = null, activePairs = [] }) {
+export default function Map({ projects, overlaps, codes, selected, activeIds = null, activePairs = [], sidebarOpen = true }) {
   const inOverlap = useMemo(() => new Set(overlaps.flatMap((o) => [o.id_a, o.id_b])), [overlaps]);
   const byId = useMemo(() => Object.fromEntries(projects.map((p) => [p.id, p])), [projects]);
   const located = useMemo(() => projects.filter((p) => points(p).length > 0), [projects]);
@@ -233,7 +234,7 @@ export default function Map({ projects, overlaps, codes, selected, activeIds = n
           <PulseHalo key={`pulse-${o.rank}`} center={o.closest_a} />
         ))}
 
-        <ZoomToSelection selectedProjects={selectedProjects} selectionKey={selectionKey} />
+        <ZoomToSelection selectedProjects={selectedProjects} selectionKey={selectionKey} sidebarOpen={sidebarOpen} />
         <ZoomControl position="bottomright" />
       </MapContainer>
 

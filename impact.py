@@ -18,7 +18,7 @@ Per overlap:
 import math
 import re
 
-from overlap import _nearest_on_segment, _to_km
+from overlap import _date, _nearest_on_segment, _to_km
 
 # ---------- assumptions (all dollars in millions unless noted) ----------
 
@@ -54,7 +54,7 @@ ASSUMPTIONS = [
     {"item": "Rebuild cost", "value": "$1.5M-$1.9M per mile", "source": SOURCES["miso"]},
     {"item": "Reconductor cost", "value": "$0.33M-$0.8M per mile (above 69 kV interpolated)", "source": SOURCES["miso"]},
     {"item": "Substation work", "value": "$1.3M-$3.4M per new position", "source": SOURCES["miso"]},
-    {"item": "Line length", "value": "straight line between the two substations (real routes are longer, so costs are understated)", "source": "GridLock"},
+    {"item": "Line length", "value": "straight line between the two substations (real routes are longer, so costs are understated)", "source": "Grid-Talk"},
     {"item": "Right-of-way width", "value": "80-175 ft by voltage", "source": SOURCES["miso"]},
     {"item": "Land value", "value": "GA $4,950/acre, SC $3,000/acre", "source": SOURCES["usda"]},
     {"item": "Mobilization", "value": f"{MOBILIZATION_RATE:.0%} of the smaller project, only when build windows overlap", "source": SOURCES["mob"]},
@@ -184,9 +184,10 @@ def estimate(a, b, overlap):
     }
 
 
-def _total(per_pair, aligned):
+def _total(per_pair, aligned, counted=None):
     """Sum savings without double counting: a project saves its mobilization / study once,
-    so the best pairs are taken first and later pairs skip items for projects already used."""
+    so the best pairs are taken first and later pairs skip items for projects already used.
+    If `counted` is a dict, it is filled with what each pair adds to the total."""
     used = {"mobilization": set(), "engineering": set()}
     total, pairs, acres = 0.0, 0, 0.0
     key_of = "savings_if_aligned" if aligned else "savings"
@@ -205,12 +206,49 @@ def _total(per_pair, aligned):
                 acres += float(item["detail"].split(" = ")[1].split(" acres")[0])
         pairs += pair_total > 0
         total += pair_total
+        if counted is not None:
+            counted[key] = pair_total
     return {
         "savings_musd": round(total, 2),
         "pairs": pairs,
         "mobilizations_avoided": len(used["mobilization"]) // 2,
         "studies_avoided": len(used["engineering"]) // 2,
         "row_acres_shared": round(acres),
+    }
+
+
+def _year(value):
+    d = _date(value)
+    return d.year if d else None
+
+
+def _timeline(per_pair, by_id):
+    """When the savings are lost if the utilities plan separately. A pair's savings are gone
+    once both projects are built on their own, so they are booked in the in-service year of
+    the later project. Amounts are the same no-double-counting shares as the totals, so the
+    running sum ends at the totals."""
+    today, aligned = {}, {}
+    _total(per_pair, aligned=False, counted=today)
+    _total(per_pair, aligned=True, counted=aligned)
+    years, undated = {}, {"today": 0.0, "aligned": 0.0, "pairs": 0}
+    for key in per_pair:
+        t, a = today.get(key, 0.0), aligned.get(key, 0.0)
+        if t <= 0 and a <= 0:
+            continue
+        ys = [_year(by_id.get((key[0], str(key[1])), {}).get("in_service")),
+              _year(by_id.get((key[2], str(key[3])), {}).get("in_service"))]
+        slot = undated if None in ys else years.setdefault(max(ys), {"today": 0.0, "aligned": 0.0, "pairs": 0})
+        slot["today"] += t
+        slot["aligned"] += a
+        slot["pairs"] += 1
+    return {
+        "by_year": [{"year": y, "today_musd": round(v["today"], 3),
+                     "aligned_musd": round(v["aligned"], 3), "pairs": v["pairs"]}
+                    for y, v in sorted(years.items())],
+        "undated": {"today_musd": round(undated["today"], 3),
+                    "aligned_musd": round(undated["aligned"], 3), "pairs": undated["pairs"]},
+        "rule": "Savings are lost in the in-service year of the later project in each pair, "
+                "once both have been built separately.",
     }
 
 
@@ -232,5 +270,6 @@ def estimate_all(records, overlaps):
         "note": "Planning-level estimate of what coordination could save (what separate planning "
                 "wastes). Each project's savings are counted once in the total.",
         "assumptions": ASSUMPTIONS,
+        "timeline": _timeline(per_pair, by_id),  # when the savings are lost, year by year
     }
     return per_pair, summary

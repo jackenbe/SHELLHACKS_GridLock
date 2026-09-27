@@ -31,7 +31,7 @@ OVERPASS_URLS = [
 ]
 OVERPASS_READ_TIMEOUT = 90   # seconds per mirror before trying the next one
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
-USER_AGENT = "gridlock-shellhacks/1.0"
+USER_AGENT = "gridtalk-shellhacks/1.0"
 
 # (south, west, north, east)
 STATES = {

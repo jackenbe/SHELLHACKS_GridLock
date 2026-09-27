@@ -1,5 +1,5 @@
 # DOMAIN comes from .env. Unset -> plain http on port 80 (use the droplet IP).
-# Set to e.g. gridlock.example.com -> Caddy fetches an HTTPS certificate automatically.
+# Set to e.g. gridtalk.example.com -> Caddy fetches an HTTPS certificate automatically.
 {$DOMAIN::80} {
 	encode zstd gzip
 

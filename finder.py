@@ -22,7 +22,7 @@ from urllib.parse import urljoin, urlparse
 
 import httpx
 
-USER_AGENT = "Mozilla/5.0 (GridLock planning-data finder; ShellHacks 2026)"
+USER_AGENT = "Mozilla/5.0 (Grid-Talk planning-data finder; ShellHacks 2026)"
 TIMEOUT = httpx.Timeout(15, connect=8)
 MAX_PDF_MB = 60
 

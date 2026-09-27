@@ -48,3 +48,14 @@ def test_total_counts_each_project_once():
     # DESC project 1 can only share one mobilization, so the total is less than the pair sum
     assert summary["current_schedules"]["savings_musd"] < round(pair_sum, 2)
     assert summary["current_schedules"]["mobilizations_avoided"] == 1
+
+
+def test_timeline_adds_up_to_totals():
+    records = [A, B, C]
+    overlaps = [O("DESC", "1", "GPC", "2", "crews", True), O("DESC", "1", "GPC", "3", "crews", False)]
+    _, summary = estimate_all(records, overlaps)
+    tl = summary["timeline"]
+    today = sum(y["today_musd"] for y in tl["by_year"]) + tl["undated"]["today_musd"]
+    aligned = sum(y["aligned_musd"] for y in tl["by_year"]) + tl["undated"]["aligned_musd"]
+    assert round(today, 2) == summary["current_schedules"]["savings_musd"]
+    assert round(aligned, 2) == summary["if_schedules_aligned"]["savings_musd"]

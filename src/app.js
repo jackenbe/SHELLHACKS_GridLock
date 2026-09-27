@@ -38,6 +38,7 @@ export default function App() {
   const [selectedRank, setSelectedRank] = useState(null);
   const [dataVersion, setDataVersion] = useState(0); // bumped after an upload/removal -> refetch
   const [loading, setLoading] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
   const [error, setError] = useState(null);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [year, setYear] = useState(null); // timeline: null = show every project
@@ -97,18 +98,28 @@ export default function App() {
   }
 
   return (
-    <div className="app">
+    <div className={sidebarOpen ? "app" : "app sidebar-closed"}>
       <Map projects={projects} overlaps={overlaps} codes={codes} selected={selected}
-        activeIds={activeIds} activePairs={activePairs} />
+        activeIds={activeIds} activePairs={activePairs} sidebarOpen={sidebarOpen} />
 
-      <TimeSlider range={yearRange} year={year} onYear={setYear}
+      <TimeSlider range={yearRange} year={year} onYear={setYear} timeline={impact?.timeline}
         stats={{ building: buildingCount, pairs: activePairs.length }} />
 
       <header className="topbar glass">
+        <button type="button" className="icon-btn sidebar-toggle" onClick={() => setSidebarOpen((o) => !o)}
+          aria-label={sidebarOpen ? "Hide list" : "Show list"} aria-expanded={sidebarOpen}
+          aria-controls="overlap-sidebar" title={sidebarOpen ? "Hide list" : "Show list"}>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <rect x="3" y="4" width="18" height="16" rx="3" />
+            <line x1="9" y1="4" x2="9" y2="20" />
+            {sidebarOpen && <rect x="3.9" y="4.9" width="4.2" height="14.2" rx="2" fill="currentColor" stroke="none" />}
+          </svg>
+        </button>
         <div className="brand">
           <Logo />
           <div>
-            <div className="brand-name">GridLock</div>
+            <div className="brand-name">Grid-Talk</div>
             <div className="brand-sub">Transmission coordination</div>
           </div>
         </div>
@@ -139,10 +150,11 @@ export default function App() {
         </button>
       </header>
 
-      <aside className="sidebar glass">
+      <aside id="overlap-sidebar" className={sidebarOpen ? "sidebar glass" : "sidebar glass collapsed"}
+        aria-hidden={!sidebarOpen} inert={sidebarOpen ? undefined : ""}>
         {error ? (
           <div className="state-msg">
-            <h3>Can't reach the GridLock API</h3>
+            <h3>Can't reach the Grid-Talk API</h3>
             <p className="muted">{error}</p>
             <button className="btn" onClick={refresh}>Try again</button>
           </div>
