@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import "./styles.css";
 import { utilityColor } from "./colors";
+import { activeInYear, buildWindow } from "./dates";
 import Map from "./map";
 import OverlapList from "./overlapList";
+import TimeSlider from "./timeSlider";
 import Upload from "./upload";
 
-const API_BASE = process.env.REACT_APP_API_BASE ?? "http://localhost:8000";
+import { API_BASE } from "./api";
 
 function Logo() {
   return (
@@ -38,6 +40,7 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [year, setYear] = useState(null); // timeline: null = show every project
 
   useEffect(() => {
     setLoading(true);
@@ -72,6 +75,22 @@ export default function App() {
   const selected = overlaps.find((o) => o.rank === selectedRank) || null;
   const located = projects.filter((p) => p.located).length;
 
+  // timeline: which projects are under construction in the chosen year
+  const yearRange = useMemo(() => {
+    const ws = projects.filter((p) => p.located).map(buildWindow).filter(Boolean);
+    if (!ws.length) return [null, null];
+    return [Math.min(...ws.map((w) => w[0].getFullYear())), Math.max(...ws.map((w) => w[1].getFullYear()))];
+  }, [projects]);
+  const activeIds = useMemo(
+    () => (year == null ? null : new Set(projects.filter((p) => activeInYear(p, year)).map((p) => p.id))),
+    [projects, year]
+  );
+  const activePairs = useMemo(
+    () => (activeIds ? overlaps.filter((o) => activeIds.has(o.id_a) && activeIds.has(o.id_b)) : []),
+    [overlaps, activeIds]
+  );
+  const buildingCount = activeIds ? projects.filter((p) => p.located && activeIds.has(p.id)).length : 0;
+
   async function removeUtility(code) {
     const res = await fetch(`${API_BASE}/api/utilities/${code}`, { method: "DELETE" });
     if (res.ok) refresh();
@@ -79,7 +98,11 @@ export default function App() {
 
   return (
     <div className="app">
-      <Map projects={projects} overlaps={overlaps} codes={codes} selected={selected} />
+      <Map projects={projects} overlaps={overlaps} codes={codes} selected={selected}
+        activeIds={activeIds} activePairs={activePairs} />
+
+      <TimeSlider range={yearRange} year={year} onYear={setYear}
+        stats={{ building: buildingCount, pairs: activePairs.length }} />
 
       <header className="topbar glass">
         <div className="brand">

@@ -2,6 +2,8 @@ import { useState } from "react";
 import { TIER_STYLES, utilityColor } from "./colors";
 import { fmtYear } from "./dates";
 import { ImpactChip, ImpactDetail, ImpactSummary } from "./impact";
+import Brief from "./brief";
+import Evidence from "./evidence";
 import Timeline from "./timeline";
 
 function TierPill({ tier }) {
@@ -70,6 +72,8 @@ export default function OverlapList({ overlaps, projectsById, codes, selectedRan
                   <p className="tier-info">{o.tier_info}</p>
                   <Timeline a={a} b={b} overlap={o} codes={codes} />
                   <ImpactDetail impact={o.impact} o={o} />
+                  <Evidence projects={[a, b]} />
+                  <Brief rank={o.rank} />
                 </div>
               )}
             </li>

@@ -19,3 +19,20 @@ export function fmtYear(value) {
   const d = parseDate(value);
   return d ? String(d.getFullYear()) : "?";
 }
+
+// Build window used by the timeline: [start, in-service]. When a filing gives no start date,
+// construction is assumed to take the 12 months before in-service, the same rule the
+// overlap engine uses for its "same build window" check.
+const YEAR_MS = 365 * 24 * 3600 * 1000;
+
+export function buildWindow(p) {
+  const end = parseDate(p.in_service);
+  if (!end) return null;
+  const start = parseDate(p.start_date) || new Date(end.getTime() - YEAR_MS);
+  return [start, end];
+}
+
+export function activeInYear(p, year) {
+  const w = buildWindow(p);
+  return !!w && w[0] <= new Date(year, 11, 31) && w[1] >= new Date(year, 0, 1);
+}

@@ -1126,6 +1126,181 @@ select {
   opacity: 0.75;
 }
 
+/* ---------- timeline scrubber ---------- */
+
+.timeline-toggle {
+  position: absolute;
+  z-index: 999;
+  left: 432px;
+  bottom: 16px;
+  border: none;
+  border-radius: 999px;
+  padding: 9px 16px;
+  font-weight: 500;
+  cursor: pointer;
+  color: var(--ink);
+}
+
+.time-slider {
+  position: absolute;
+  z-index: 999;
+  left: 432px;
+  bottom: 16px;
+  width: min(620px, calc(100vw - 432px - 470px));
+  min-width: 380px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 18px;
+}
+
+.play-btn {
+  width: 38px;
+  height: 38px;
+  flex: none;
+  border: none;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.ts-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.ts-top {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.ts-year {
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.ts-stats {
+  font-size: 12px;
+  color: var(--ink-2);
+}
+
+.time-slider input[type="range"] {
+  width: 100%;
+  accent-color: var(--accent);
+  margin: 4px 0 2px;
+}
+
+.ts-note {
+  font-size: 10.5px;
+  color: var(--ink-3);
+}
+
+/* ---------- evidence + memo ---------- */
+
+.ev-project + .ev-project {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 0.5px solid var(--stroke);
+}
+
+.ev-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.ev-link {
+  margin-left: auto;
+  color: var(--accent);
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.ev-link:hover {
+  text-decoration: underline;
+}
+
+.ev-end {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.ev-name {
+  font-weight: 500;
+}
+
+.conf-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+  transform: translateY(-1px);
+}
+
+.conf-dot.high {
+  background: #30d158;
+}
+
+.conf-dot.low {
+  background: #ffcc00;
+}
+
+.conf-dot.unconfirmed,
+.conf-dot.missing {
+  background: var(--ink-3);
+}
+
+.brief-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.brief-badge {
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--fill);
+}
+
+.brief-badge.ai {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+}
+
+.brief-note {
+  font-size: 11px;
+  color: var(--warn);
+  margin-bottom: 6px;
+}
+
+.brief-text {
+  white-space: pre-wrap;
+  font-family: var(--font);
+  font-size: 12.5px;
+  line-height: 1.55;
+  background: var(--glass-strong);
+  border-radius: 10px;
+  padding: 12px;
+  max-height: 320px;
+  overflow-y: auto;
+  user-select: text;
+}
+
 /* ---------- small screens: panels stack, list becomes a bottom sheet ---------- */
 
 @media (max-width: 820px) {
@@ -1153,7 +1328,9 @@ select {
   }
 
   .legend,
-  .app .leaflet-control-zoom {
+  .app .leaflet-control-zoom,
+  .timeline-toggle,
+  .time-slider {
     display: none;
   }
 }

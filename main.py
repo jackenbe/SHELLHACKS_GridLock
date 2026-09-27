@@ -12,6 +12,8 @@ GET  /api/overlaps                       ranked overlaps (filter: tier, time_ove
 GET  /api/overlaps/{rank}                one overlap with both projects in full
 GET  /api/validation                     data-quality report
 GET  /api/impact                         money + resources saved by coordinating (and assumptions)
+POST /api/overlaps/{rank}/brief          coordination memo for one overlap (Gemini, fact-checked)
+GET  /api/source/{utility}               the utility's original PDF (add #page=N to open a page)
 GET  /api/utilities                      utilities loaded (preloaded + uploaded)
 DELETE /api/utilities/{code}             remove an uploaded utility (preloaded ones stay)
 POST /api/upload                         upload a utility's PDF (multipart) -> {job_id}
@@ -27,9 +29,11 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+import brief
 import finder
 import pipeline
 from overlap import closest_points
@@ -72,8 +76,8 @@ router = APIRouter(prefix="/api")
 
 PROJECT_KEYS = [
     "utility", "project_id", "name", "status", "in_service", "start_date", "total_cost", "page",
-    "endpoint_a", "lat_a", "lon_a", "match_a", "conf_a",
-    "endpoint_b", "lat_b", "lon_b", "match_b", "conf_b",
+    "endpoint_a", "lat_a", "lon_a", "match_a", "conf_a", "loc_source_a",
+    "endpoint_b", "lat_b", "lon_b", "match_b", "conf_b", "loc_source_b",
 ]
 
 
@@ -178,6 +182,35 @@ def overlap(rank: int):
         if o.rank == rank:
             return _overlap_out(o, full=True)
     raise HTTPException(404, "overlap not found")
+
+
+@router.post("/overlaps/{rank}/brief")
+def overlap_brief(rank: int):
+    """Coordination memo: Gemini drafts it from GridLock's data, every number is checked."""
+    o = next((x for x in STATE["overlaps"] if x.rank == rank), None)
+    if o is None:
+        raise HTTPException(404, "overlap not found")
+    a, b = _find_project(o.utility_a, o.project_a), _find_project(o.utility_b, o.project_b)
+    near = closest_points(a, b) if a and b else None
+    names = {code: u["name"] for code, u in pipeline.UTILITIES.items()}
+    impact_ = STATE["impact"][0].get((o.utility_a, o.project_a, o.utility_b, o.project_b))
+    return brief.coordination_brief(o, a, b, impact_, names,
+                                    _near_name(a, near[0]) if near else None,
+                                    _near_name(b, near[1]) if near else None)
+
+
+@router.get("/source/{code}")
+def source_pdf(code: str):
+    """The utility's original filing, shown inline so links can jump to #page=N."""
+    u = pipeline.UTILITIES.get(code.upper())
+    if not u:
+        raise HTTPException(404, "unknown utility")
+    rel = Path(u["pdf"].lstrip("/"))
+    path = BASE / rel
+    if ".." in rel.parts or not path.is_file():
+        raise HTTPException(404, "source file not found")
+    return FileResponse(path, media_type="application/pdf",
+                        headers={"Content-Disposition": f'inline; filename="{code.upper()}-filing.pdf"'})
 
 
 @router.get("/impact")

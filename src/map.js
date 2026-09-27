@@ -1,9 +1,10 @@
 import "leaflet/dist/leaflet.css";
-import { memo, useEffect, useMemo } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
 import L from "leaflet";
 import {
   CircleMarker, MapContainer, Polyline, Popup, TileLayer, Tooltip, ZoomControl, useMap,
 } from "react-leaflet";
+import { sourceUrl } from "./api";
 import { utilityColor } from "./colors";
 import { fmtMonth } from "./dates";
 
@@ -80,6 +81,10 @@ function ProjectPopup({ p }) {
           B: {p.match_b || p.endpoint_b} ({p.conf_b})
         </>
       )}
+      <br />
+      <a href={sourceUrl(p)} target="_blank" rel="noreferrer">
+        Open {p.utility} filing{p.page ? `, page ${p.page}` : ""} ↗
+      </a>
     </Popup>
   );
 }
@@ -131,6 +136,19 @@ const ProjectShape = memo(function ProjectShape({ p, color, selected, faded, ove
   );
 });
 
+// Timeline mode: a ring that pulses on each overlapping pair being built in the same year.
+function PulseHalo({ center }) {
+  const [big, setBig] = useState(false);
+  useEffect(() => {
+    const t = setInterval(() => setBig((b) => !b), 650);
+    return () => clearInterval(t);
+  }, []);
+  return (
+    <CircleMarker center={center} radius={big ? 17 : 10} interactive={false}
+      pathOptions={{ color: "#B3131A", weight: 2.5, fill: false, opacity: big ? 0.3 : 0.9 }} />
+  );
+}
+
 function DistanceLine({ overlap }) {
   if (!overlap.closest_a || !overlap.closest_b) return null;
   const { distance_km: km, distance_mi: mi, closest_name_a: na, closest_name_b: nb } = overlap;
@@ -166,7 +184,7 @@ function DistanceLine({ overlap }) {
   );
 }
 
-export default function Map({ projects, overlaps, codes, selected }) {
+export default function Map({ projects, overlaps, codes, selected, activeIds = null, activePairs = [] }) {
   const inOverlap = useMemo(() => new Set(overlaps.flatMap((o) => [o.id_a, o.id_b])), [overlaps]);
   const byId = useMemo(() => Object.fromEntries(projects.map((p) => [p.id, p])), [projects]);
   const located = useMemo(() => projects.filter((p) => points(p).length > 0), [projects]);
@@ -199,7 +217,7 @@ export default function Map({ projects, overlaps, codes, selected }) {
             key={p.id}
             p={p}
             color={utilityColor(p.utility, codes)}
-            faded={!!selected}
+            faded={selected ? true : activeIds ? !activeIds.has(p.id) : false}
             overlapping={inOverlap.has(p.id)}
           />
         ))}
@@ -211,6 +229,9 @@ export default function Map({ projects, overlaps, codes, selected }) {
             side={labelSide(selectedProjects, i)} />
         ))}
         {selected && <DistanceLine key={`dist-${selected.rank}`} overlap={selected} />}
+        {!selected && activePairs.filter((o) => o.closest_a).map((o) => (
+          <PulseHalo key={`pulse-${o.rank}`} center={o.closest_a} />
+        ))}
 
         <ZoomToSelection selectedProjects={selectedProjects} selectionKey={selectionKey} />
         <ZoomControl position="bottomright" />

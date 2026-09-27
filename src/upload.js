@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
-const API_BASE = process.env.REACT_APP_API_BASE ?? "http://localhost:8000";
+import { API_BASE } from "./api";
 const STATES = ["SC", "GA", "NC", "FL", "AL", "TN", "VA"];
 
 // "Add a utility" sheet. Two ways in: find the utility's planning PDFs online, or upload one.
