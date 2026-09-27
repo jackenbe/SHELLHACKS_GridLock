@@ -54,7 +54,7 @@ ASSUMPTIONS = [
     {"item": "Rebuild cost", "value": "$1.5M-$1.9M per mile", "source": SOURCES["miso"]},
     {"item": "Reconductor cost", "value": "$0.33M-$0.8M per mile (above 69 kV interpolated)", "source": SOURCES["miso"]},
     {"item": "Substation work", "value": "$1.3M-$3.4M per new position", "source": SOURCES["miso"]},
-    {"item": "Line length", "value": "straight line between the two substations (real routes are longer, so costs are understated)", "source": "Grid-Talk"},
+    {"item": "Line length", "value": "straight line between the two substations (real routes are longer, so costs are understated)", "source": "GridTalk"},
     {"item": "Right-of-way width", "value": "80-175 ft by voltage", "source": SOURCES["miso"]},
     {"item": "Land value", "value": "GA $4,950/acre, SC $3,000/acre", "source": SOURCES["usda"]},
     {"item": "Mobilization", "value": f"{MOBILIZATION_RATE:.0%} of the smaller project, only when build windows overlap", "source": SOURCES["mob"]},

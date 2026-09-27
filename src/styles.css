@@ -1,4 +1,4 @@
-/* Grid-Talk: full-bleed map with floating glass panels.
+/* GridTalk: full-bleed map with floating glass panels.
    Tokens first; everything else reads from them, so light and dark stay in sync. */
 
 :root {

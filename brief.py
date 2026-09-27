@@ -1,6 +1,6 @@
 """Coordination memo for one overlap: what a planner would send to the other utility.
 
-Gemini writes it from a fact sheet built only from Grid-Talk's own data, then every number in
+Gemini writes it from a fact sheet built only from GridTalk's own data, then every number in
 the draft is checked against that fact sheet. If Gemini is unavailable, or its draft contains
 a number that is not in the data, a fact-only template memo is returned instead, so the memo
 is never less accurate than the rest of the app.

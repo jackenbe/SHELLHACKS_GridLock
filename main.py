@@ -1,4 +1,4 @@
-"""Grid-Talk API.
+"""GridTalk API.
 
 Startup builds (or loads the cached) pipeline once; every endpoint serves from memory.
 
@@ -59,7 +59,7 @@ async def lifespan(app):
     yield
 
 
-app = FastAPI(title="Grid-Talk", lifespan=lifespan)
+app = FastAPI(title="GridTalk", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[  # React dev servers: create-react-app (3000) and Vite (5173)
@@ -186,7 +186,7 @@ def overlap(rank: int):
 
 @router.post("/overlaps/{rank}/brief")
 def overlap_brief(rank: int):
-    """Coordination memo: Gemini drafts it from Grid-Talk's data, every number is checked."""
+    """Coordination memo: Gemini drafts it from GridTalk's data, every number is checked."""
     o = next((x for x in STATE["overlaps"] if x.rank == rank), None)
     if o is None:
         raise HTTPException(404, "overlap not found")

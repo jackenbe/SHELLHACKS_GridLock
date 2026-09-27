@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { API_BASE } from "./api";
 
-// "Draft coordination memo": Gemini writes it from Grid-Talk's data; the backend checks every
+// "Draft coordination memo": Gemini writes it from GridTalk's data; the backend checks every
 // number against that data and falls back to a fact-only template if anything doesn't match.
 export default function Brief({ rank }) {
   const [state, setState] = useState({ loading: false, result: null, error: null });

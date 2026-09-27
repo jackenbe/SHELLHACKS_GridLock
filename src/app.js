@@ -119,7 +119,7 @@ export default function App() {
         <div className="brand">
           <Logo />
           <div>
-            <div className="brand-name">Grid-Talk</div>
+            <div className="brand-name">GridTalk</div>
             <div className="brand-sub">Transmission coordination</div>
           </div>
         </div>
@@ -154,7 +154,7 @@ export default function App() {
         aria-hidden={!sidebarOpen} inert={sidebarOpen ? undefined : ""}>
         {error ? (
           <div className="state-msg">
-            <h3>Can't reach the Grid-Talk API</h3>
+            <h3>Can't reach the GridTalk API</h3>
             <p className="muted">{error}</p>
             <button className="btn" onClick={refresh}>Try again</button>
           </div>
